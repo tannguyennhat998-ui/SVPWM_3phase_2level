@@ -1,0 +1,532 @@
+
+#include "F28x_Project.h"
+#include "F2837xD_device.h"
+#include "F2837xD_Examples.h"
+#include "driverlib.h"
+#include "device.h"
+#include "math.h"
+
+
+void Init_ePWM(void);
+void Setup_ePWM(void);
+void Setup(void);
+void Init_ADC(void);
+void Init_DAC(void);
+__interrupt void cpu_timer0_isr(void);
+__interrupt void adc_isr(void);
+void PWM(void);
+//void nut_nhan(void);
+
+
+#define A           5000        // 10k; TBPRD; fPWM = TBCLK / (2 * TBPRD), TBCLK=200Mhz ,7142.857 14k, 6666.67 15k, 8333 12k, 9091 11k         // modulation index
+#define pi          3.1415926535
+#define tdead       70
+#define max(a,b) ((a) > (b) ? (a) : (b))
+
+
+#define PWM0 GpioDataRegs.GPADAT.bit.GPIO0
+#define PWM1 GpioDataRegs.GPADAT.bit.GPIO1
+#define PWM2 GpioDataRegs.GPADAT.bit.GPIO2
+#define PWM3 GpioDataRegs.GPADAT.bit.GPIO3
+#define PWM4 GpioDataRegs.GPADAT.bit.GPIO4
+#define PWM5 GpioDataRegs.GPADAT.bit.GPIO5
+#define PWM6 GpioDataRegs.GPADAT.bit.GPIO6
+#define PWM7 GpioDataRegs.GPADAT.bit.GPIO7
+#define PWM8 GpioDataRegs.GPADAT.bit.GPIO8
+#define PWM9 GpioDataRegs.GPADAT.bit.GPIO9
+#define PWM10 GpioDataRegs.GPADAT.bit.GPIO10
+#define PWM11 GpioDataRegs.GPADAT.bit.GPIO11
+
+
+double m =0.9;
+double vsine, s5;
+double  D, UST,LST;
+
+double t=0,goc=0,vap,flag=0;
+double vap,van,vbp,vbn,vcp,vcn;
+double vau,vad,vbu,vbd,vcu,vcd;
+double t1,t3,t5;
+double n,theta,phi;
+double a,b,c;
+double va,vb,vc;
+
+
+
+float adc_val_c12=0,voltage_c12_temp=0,v_adc_c12=0,voltage_c12=0;
+float adc_val_c34=0,voltage_c34_temp=0,v_adc_c34=0,voltage_c34=0;
+float setpoint_vpn=100,error=0,error_prev=0,PI=0,PI_prev=0;
+float dac_val=0;
+
+#define N 100
+float voltage_buffer[N];
+int idx = 1;
+
+void main(void)
+{
+    InitSysCtrl(); //CPU=200MHz => PWM clock = 200MHz
+    InitGpio();
+    Setup();
+    PWM();
+    Init_ePWM();
+    Setup_ePWM();
+    Init_ADC();
+    //InitFlash();
+    //Init_DAC();
+    while(1)
+    {
+
+        goc=t*1.8; //t*360/200
+        PWM();
+        //nut_nhan();
+
+        vap=vap*A;
+        van=van*A;
+        vbp=vbp*A;
+        vbn=vbn*A;
+        vcp=vcp*A;
+        vcn=vcn*A;
+
+        EPwm1Regs.CMPA.bit.CMPA = vap;
+        EPwm1Regs.CMPB.bit.CMPB = van;
+
+        EPwm2Regs.CMPA.bit.CMPA = vbp;
+        EPwm2Regs.CMPB.bit.CMPB = vbn;
+
+        EPwm3Regs.CMPA.bit.CMPA = vcp;
+        EPwm3Regs.CMPB.bit.CMPB = vcn;
+
+        /*EPwm4Regs.CMPA.bit.CMPA = vbn;
+        EPwm4Regs.CMPB.bit.CMPB = vbn;
+
+        EPwm5Regs.CMPA.bit.CMPA = vcp;
+        EPwm5Regs.CMPB.bit.CMPB = vcp;
+
+        EPwm6Regs.CMPA.bit.CMPA = vcn;
+        EPwm6Regs.CMPB.bit.CMPB = vcn;*/
+
+
+
+
+    }
+
+}
+
+__interrupt void cpu_timer0_isr(void)
+{
+    CpuTimer0.InterruptCount++;
+
+    t += 1.0;
+    if (t > 199)
+    {
+        t = 0;
+        EPwm1Regs.TBCTL.bit.SWFSYNC = 1;   // software sync pulse
+        EPwm1Regs.TBCTL.bit.SWFSYNC = 0;
+    }
+
+    PieCtrlRegs.PIEACK.all = PIEACK_GROUP1;
+}
+
+
+
+void PWM()
+{
+
+    theta=goc-90;
+    if(theta>180){theta=theta-360;}
+    theta=theta*pi/180;
+
+
+    phi=theta;
+
+    t1=1.0/3+(m/3.0)*cos(phi);
+    t3=1.0/3+(m/3.0)*sin(phi-pi/6);
+    t5=1-(t1+t3);
+
+
+
+    vau=1;
+    vad=t3+t5;
+    vbu=t3+t5;
+    vbd=t5;
+    vcu=t5;
+    vcd=0;
+                     vap=vau;
+                     van=vad;
+                     vbp=vbu;
+                     vbn=vbd;
+                     vcp=vcu;
+                     vcn=vcd;
+
+
+
+
+}
+
+
+
+
+
+
+void Setup_ePWM(void)
+{
+
+
+    EPwm1Regs.TBPRD = A;
+     EPwm1Regs.TBPHS.bit.TBPHS = 0;
+     EPwm1Regs.TBCTR = 0;
+     EPwm1Regs.TBCTL.bit.CTRMODE   = TB_COUNT_UPDOWN;
+     EPwm1Regs.TBCTL.bit.PHSEN     = TB_DISABLE;
+     EPwm1Regs.TBCTL.bit.PHSDIR    = TB_UP;
+     EPwm1Regs.TBCTL.bit.PRDLD     = TB_SHADOW;
+     EPwm1Regs.TBCTL.bit.SYNCOSEL  = TB_CTR_ZERO;
+     EPwm1Regs.TBCTL.bit.HSPCLKDIV = TB_DIV1;
+     EPwm1Regs.TBCTL.bit.CLKDIV    = TB_DIV1;
+
+     EPwm1Regs.CMPCTL.bit.SHDWAMODE = CC_SHADOW;
+     EPwm1Regs.CMPCTL.bit.SHDWBMODE = CC_SHADOW;
+     EPwm1Regs.CMPCTL.bit.LOADAMODE = CC_CTR_ZERO;
+     EPwm1Regs.CMPCTL.bit.LOADBMODE = CC_CTR_ZERO;
+
+     EPwm1Regs.AQCTLA.bit.PRD = AQ_NO_ACTION;
+     EPwm1Regs.AQCTLA.bit.ZRO = AQ_NO_ACTION;
+     EPwm1Regs.AQCTLA.bit.CAD = AQ_SET;
+     EPwm1Regs.AQCTLA.bit.CAU = AQ_CLEAR;
+     EPwm1Regs.AQCTLB.bit.CBD = AQ_CLEAR;
+     EPwm1Regs.AQCTLB.bit.CBU = AQ_SET;
+
+
+     EPwm1Regs.DBCTL.bit.IN_MODE  = DBA_RED_DBB_FED;
+     EPwm1Regs.DBCTL.bit.OUT_MODE = DB_FULL_ENABLE;
+     EPwm1Regs.DBCTL.bit.POLSEL   = DB_ACTV_HI;
+     EPwm1Regs.DBRED.all = 0;
+     EPwm1Regs.DBFED.all = 0;
+
+
+
+
+     EPwm2Regs.TBPRD = A;
+     EPwm2Regs.TBPHS.bit.TBPHS = 0;
+     EPwm2Regs.TBCTR = 0;
+     EPwm2Regs.TBCTL.bit.CTRMODE   = TB_COUNT_UPDOWN;
+     EPwm2Regs.TBCTL.bit.PHSEN     = TB_DISABLE;
+     EPwm2Regs.TBCTL.bit.PHSDIR    = TB_UP;
+     EPwm2Regs.TBCTL.bit.PRDLD     = TB_SHADOW;
+     EPwm2Regs.TBCTL.bit.SYNCOSEL  = TB_CTR_ZERO;
+     EPwm2Regs.TBCTL.bit.HSPCLKDIV = TB_DIV1;
+     EPwm2Regs.TBCTL.bit.CLKDIV    = TB_DIV1;
+
+     EPwm2Regs.CMPCTL.bit.SHDWAMODE = CC_SHADOW;
+     EPwm2Regs.CMPCTL.bit.SHDWBMODE = CC_SHADOW;
+     EPwm2Regs.CMPCTL.bit.LOADAMODE = CC_CTR_ZERO;
+     EPwm2Regs.CMPCTL.bit.LOADBMODE = CC_CTR_ZERO;
+
+     EPwm2Regs.AQCTLA.bit.PRD = AQ_NO_ACTION;
+     EPwm2Regs.AQCTLA.bit.ZRO = AQ_NO_ACTION;
+     EPwm2Regs.AQCTLA.bit.CAD = AQ_SET;
+     EPwm2Regs.AQCTLA.bit.CAU = AQ_CLEAR;
+     EPwm2Regs.AQCTLB.bit.CBD = AQ_CLEAR;
+     EPwm2Regs.AQCTLB.bit.CBU = AQ_SET;
+
+
+     EPwm2Regs.DBCTL.bit.IN_MODE  = DBA_RED_DBB_FED;
+     EPwm2Regs.DBCTL.bit.OUT_MODE = DB_FULL_ENABLE;
+     EPwm2Regs.DBCTL.bit.POLSEL   = DB_ACTV_HI;
+     EPwm2Regs.DBRED.all = 0;
+     EPwm2Regs.DBFED.all = 0;
+
+
+     EPwm3Regs.TBPRD = A;
+     EPwm3Regs.TBPHS.bit.TBPHS = 0;
+     EPwm3Regs.TBCTR = 0;
+     EPwm3Regs.TBCTL.bit.CTRMODE   = TB_COUNT_UPDOWN;
+     EPwm3Regs.TBCTL.bit.PHSEN     = TB_DISABLE;
+     EPwm3Regs.TBCTL.bit.PHSDIR    = TB_UP;
+     EPwm3Regs.TBCTL.bit.PRDLD     = TB_SHADOW;
+     EPwm3Regs.TBCTL.bit.SYNCOSEL  = TB_CTR_ZERO;
+     EPwm3Regs.TBCTL.bit.HSPCLKDIV = TB_DIV1;
+     EPwm3Regs.TBCTL.bit.CLKDIV    = TB_DIV1;
+
+     EPwm3Regs.CMPCTL.bit.SHDWAMODE = CC_SHADOW;
+     EPwm3Regs.CMPCTL.bit.SHDWBMODE = CC_SHADOW;
+     EPwm3Regs.CMPCTL.bit.LOADAMODE = CC_CTR_ZERO;
+     EPwm3Regs.CMPCTL.bit.LOADBMODE = CC_CTR_ZERO;
+
+     EPwm3Regs.AQCTLA.bit.PRD = AQ_NO_ACTION;
+     EPwm3Regs.AQCTLA.bit.ZRO = AQ_NO_ACTION;
+     EPwm3Regs.AQCTLA.bit.CAD = AQ_SET;
+     EPwm3Regs.AQCTLA.bit.CAU = AQ_CLEAR;
+     EPwm3Regs.AQCTLB.bit.CBD = AQ_CLEAR;
+     EPwm3Regs.AQCTLB.bit.CBU = AQ_SET;
+
+
+     EPwm3Regs.DBCTL.bit.IN_MODE  = DBA_RED_DBB_FED;
+     EPwm3Regs.DBCTL.bit.OUT_MODE = DB_FULL_ENABLE;
+     EPwm3Regs.DBCTL.bit.POLSEL   = DB_ACTV_HI;
+     EPwm3Regs.DBRED.all = 0;
+     EPwm3Regs.DBFED.all = 0;
+
+
+     /*EPwm4Regs.TBPRD = A;
+     EPwm4Regs.TBPHS.bit.TBPHS = 0;
+     EPwm4Regs.TBCTR = 0;
+     EPwm4Regs.TBCTL.bit.CTRMODE   = TB_COUNT_UPDOWN;
+     EPwm4Regs.TBCTL.bit.PHSEN     = TB_DISABLE;
+     EPwm4Regs.TBCTL.bit.PHSDIR    = TB_UP;
+     EPwm4Regs.TBCTL.bit.PRDLD     = TB_SHADOW;
+     EPwm4Regs.TBCTL.bit.SYNCOSEL  = TB_CTR_ZERO;
+     EPwm4Regs.TBCTL.bit.HSPCLKDIV = TB_DIV1;
+     EPwm4Regs.TBCTL.bit.CLKDIV    = TB_DIV1;
+
+     EPwm4Regs.CMPCTL.bit.SHDWAMODE = CC_SHADOW;
+     EPwm4Regs.CMPCTL.bit.SHDWBMODE = CC_SHADOW;
+     EPwm4Regs.CMPCTL.bit.LOADAMODE = CC_CTR_ZERO;
+     EPwm4Regs.CMPCTL.bit.LOADBMODE = CC_CTR_ZERO;
+
+     EPwm4Regs.AQCTLA.bit.CAD = AQ_SET;
+     EPwm4Regs.AQCTLA.bit.CAU = AQ_CLEAR;
+     //EPwm4Regs.AQCTLB.bit.CBD = AQ_CLEAR;
+     //EPwm4Regs.AQCTLB.bit.CBU = AQ_SET;
+
+     EPwm4Regs.DBCTL.bit.IN_MODE  = DBA_ALL;
+     EPwm4Regs.DBCTL.bit.OUT_MODE = DB_FULL_ENABLE;
+     EPwm4Regs.DBCTL.bit.POLSEL   = DB_ACTV_HIC  ;
+     EPwm4Regs.DBRED.all = 0;
+     EPwm4Regs.DBFED.all = 0;
+
+
+     EPwm5Regs.TBPRD = A;
+     EPwm5Regs.TBPHS.bit.TBPHS = 0;
+     EPwm5Regs.TBCTR = 0;
+     EPwm5Regs.TBCTL.bit.CTRMODE   = TB_COUNT_UPDOWN;
+     EPwm5Regs.TBCTL.bit.PHSEN     = TB_DISABLE;
+     EPwm5Regs.TBCTL.bit.PHSDIR    = TB_UP;
+     EPwm5Regs.TBCTL.bit.PRDLD     = TB_SHADOW;
+     EPwm5Regs.TBCTL.bit.SYNCOSEL  = TB_CTR_ZERO;
+     EPwm5Regs.TBCTL.bit.HSPCLKDIV = TB_DIV1;
+     EPwm5Regs.TBCTL.bit.CLKDIV    = TB_DIV1;
+
+     EPwm5Regs.CMPCTL.bit.SHDWAMODE = CC_SHADOW;
+     EPwm5Regs.CMPCTL.bit.SHDWBMODE = CC_SHADOW;
+     EPwm5Regs.CMPCTL.bit.LOADAMODE = CC_CTR_ZERO;
+     EPwm5Regs.CMPCTL.bit.LOADBMODE = CC_CTR_ZERO;
+
+     EPwm5Regs.AQCTLA.bit.PRD = AQ_NO_ACTION;
+     EPwm5Regs.AQCTLA.bit.ZRO = AQ_NO_ACTION;
+     EPwm5Regs.AQCTLA.bit.CAU = AQ_SET;
+     EPwm5Regs.AQCTLA.bit.CAD = AQ_CLEAR;
+     //EPwm5Regs.AQCTLB.bit.CBD = AQ_CLEAR;
+     //EPwm5Regs.AQCTLB.bit.CBU = AQ_SET;
+
+     EPwm5Regs.DBCTL.bit.IN_MODE  = DBA_ALL;
+     EPwm5Regs.DBCTL.bit.OUT_MODE = DB_FULL_ENABLE;
+     EPwm5Regs.DBCTL.bit.POLSEL   = DB_ACTV_HIC;
+     EPwm5Regs.DBRED.all = 0;
+     EPwm5Regs.DBFED.all = 0;
+
+
+     EPwm6Regs.TBPRD = A;
+     EPwm6Regs.TBPHS.bit.TBPHS = 0;
+     EPwm6Regs.TBCTR = 0;
+     EPwm6Regs.TBCTL.bit.CTRMODE   = TB_COUNT_UPDOWN;
+     EPwm6Regs.TBCTL.bit.PHSEN     = TB_DISABLE;
+     EPwm6Regs.TBCTL.bit.PHSDIR    = TB_UP;
+     EPwm6Regs.TBCTL.bit.PRDLD     = TB_SHADOW;
+     EPwm6Regs.TBCTL.bit.SYNCOSEL  = TB_CTR_ZERO;
+     EPwm6Regs.TBCTL.bit.HSPCLKDIV = TB_DIV1;
+     EPwm6Regs.TBCTL.bit.CLKDIV    = TB_DIV1;
+
+     EPwm6Regs.CMPCTL.bit.SHDWAMODE = CC_SHADOW;
+     EPwm6Regs.CMPCTL.bit.SHDWBMODE = CC_SHADOW;
+     EPwm6Regs.CMPCTL.bit.LOADAMODE = CC_CTR_ZERO;
+     EPwm6Regs.CMPCTL.bit.LOADBMODE = CC_CTR_ZERO;
+
+     EPwm6Regs.AQCTLA.bit.PRD = AQ_NO_ACTION;
+     EPwm6Regs.AQCTLA.bit.ZRO = AQ_NO_ACTION;
+     EPwm6Regs.AQCTLA.bit.CAU = AQ_SET;
+     EPwm6Regs.AQCTLA.bit.CAD = AQ_CLEAR;
+     //EPwm6Regs.AQCTLB.bit.CBD = AQ_CLEAR;
+     //EPwm6Regs.AQCTLB.bit.CBU = AQ_SET;
+
+
+     EPwm6Regs.DBCTL.bit.IN_MODE  = DBA_ALL;
+     EPwm6Regs.DBCTL.bit.OUT_MODE = DB_FULL_ENABLE;
+     EPwm6Regs.DBCTL.bit.POLSEL   = DB_ACTV_HIC;
+     EPwm6Regs.DBRED.all = 0;
+     EPwm6Regs.DBFED.all = 0;*/
+
+
+}
+
+
+
+
+
+void Setup(void)
+{
+    DINT;
+    InitPieCtrl();
+    IER = 0x0000;
+    IFR = 0x0000;
+    Interrupt_initModule(); // interrupt
+    InitPieVectTable();
+    EALLOW;
+    PieVectTable.ADCA1_INT = &adc_isr;
+    //Interrupt_register(INT_ADCA1, &adc_isr);
+    EDIS;
+
+    // Re-map Timer0 ISR vector
+    EALLOW;
+    PieVectTable.TIMER0_INT = &cpu_timer0_isr;
+    EDIS;
+
+    InitCpuTimers();
+    ConfigCpuTimer(&CpuTimer0, 100, 100);     // 100 us period ,
+    CpuTimer0Regs.TCR.bit.TIE = 1;               // enable Timer0 interrupt
+
+    // Enable PIE group 1, INTx7 (Timer0)
+    Interrupt_enable(INT_ADCA1); // Turn on ADC interrupt
+    PieCtrlRegs.PIEIER1.bit.INTx7 = 1;
+    IER |= 1;
+
+
+    EINT;   // Global interrupt enable
+    ERTM;   // Real-time debug
+
+    CpuTimer0Regs.TCR.bit.TSS = 0; // start Timer0
+}
+void Init_ADC(void)
+{
+    EALLOW;
+    AdcaRegs.ADCCTL2.bit.PRESCALE = 6;  // ADCCLK = SYSCLK / 4
+    EDIS;
+
+    ADC_setMode(ADCA_BASE, ADC_RESOLUTION_12BIT, ADC_MODE_SINGLE_ENDED);
+
+    EALLOW;
+    AdcaRegs.ADCCTL1.bit.ADCPWDNZ = 1;   // Turn on ADC
+    AdcaRegs.ADCCTL1.bit.INTPULSEPOS = 1; // Interrupt when conversion is ended (mode)
+    EDIS;
+
+    DELAY_US(1000); // wait for ADC stabilization
+
+
+    EALLOW;
+    // SOC0
+    AdcaRegs.ADCSOC0CTL.bit.ACQPS = 14;   // Sample time (t_sample = (ACQPS+1) * t_ADC_clock)
+    AdcaRegs.ADCSOC0CTL.bit.CHSEL = 14;    // ADCINA14
+    AdcaRegs.ADCSOC0CTL.bit.TRIGSEL = 0x05;  // Activate by EPWM1 SOCA
+    EDIS;
+
+
+    EALLOW;
+    // SOC1
+    AdcaRegs.ADCSOC1CTL.bit.ACQPS = 14;   // Sample time (t_sample = (ACQPS+1) * t_ADC_clock)
+    AdcaRegs.ADCSOC1CTL.bit.CHSEL = 15;    // ADCINA14
+    AdcaRegs.ADCSOC1CTL.bit.TRIGSEL = 0x05;  // Activate by EPWM1 SOCA
+    EDIS;
+
+    EALLOW;
+    // ADC
+    AdcaRegs.ADCINTSEL1N2.bit.INT1SEL = 1; // ADCINT1 interrupt for EOC
+    AdcaRegs.ADCINTSEL1N2.bit.INT1E = 1;   // Set interrupt flag ADCINT1
+    AdcaRegs.ADCINTFLGCLR.bit.ADCINT1 = 1; // Reset interrupt flag
+    EDIS;
+
+
+}
+__interrupt void adc_isr(void)
+{
+    //Vin from 34-104
+    // Read ADC value and store in buffer
+    adc_val_c12 = AdcaResultRegs.ADCRESULT0; //0.8mV
+    adc_val_c34 = AdcaResultRegs.ADCRESULT1; //0.8mV
+
+    error=setpoint_vpn-(2*voltage_c34+2*voltage_c12);
+
+    //PI=0.0002201*error-0.0002194*error_prev+PI_prev;
+    /*
+    if (error>15 || error<-15)
+    {
+    PI=0.006006*error-0.005994*error_prev+PI_prev;
+    }
+    else
+    {
+    PI=0.0002201*error-0.0002194*error_prev+PI_prev;
+    }
+    PI=0.006001*error-0.005999*error_prev+PI_prev;
+    */
+    PI=0.006001*error-0.005999*error_prev+PI_prev;
+    error_prev=error;
+    PI_prev=PI;
+
+    // Reset interrupt flag
+    AdcaRegs.ADCINTFLGCLR.bit.ADCINT1 = 1;
+    PieCtrlRegs.PIEACK.all = PIEACK_GROUP1;
+}
+void Init_DAC(void)
+{
+
+    EALLOW;
+
+    DacaRegs.DACCTL.bit.DACREFSEL = 1;     // VREFHI = 3.3V
+    DacaRegs.DACOUTEN.bit.DACOUTEN = 1;    // enable output
+    DacaRegs.DACVALS.all = 0;           //
+
+    DacbRegs.DACCTL.bit.DACREFSEL = 1;     // VREFHI = 3.3V
+    DacbRegs.DACOUTEN.bit.DACOUTEN = 1;    // enable output
+    DacbRegs.DACVALS.all = 0;           //
+    EDIS;
+
+
+}
+void Init_ePWM(void)
+{
+    EALLOW;
+    ClkCfgRegs.PERCLKDIVSEL.bit.EPWMCLKDIV = 0;   // 0 => /1 (EPWMCLK = SYSCLKOUT)
+    EDIS;
+    //set clock for ePWM
+    EALLOW;
+    CpuSysRegs.PCLKCR2.bit.EPWM1 = 1;   //  SA1T SA2T (40,39)
+    CpuSysRegs.PCLKCR2.bit.EPWM2 = 1;   //  SA4T SA3T (38,37)
+    CpuSysRegs.PCLKCR2.bit.EPWM3 = 1;   //  S5T S7T (36,35)
+    CpuSysRegs.PCLKCR2.bit.EPWM4 = 1;   //  S6T S8T (80,79)
+    CpuSysRegs.PCLKCR2.bit.EPWM5 = 1;   //  shoot-through (08,09)
+    CpuSysRegs.PCLKCR2.bit.EPWM6 = 1;   //  shoot-through (10,11) =>11
+    EDIS;
+
+    //configure output pins for ePWM
+    EALLOW;
+    GpioCtrlRegs.GPAMUX1.bit.GPIO0  = 1;   // EPWM1A
+    GpioCtrlRegs.GPAMUX1.bit.GPIO1  = 1;   // EPWM1B
+    GpioCtrlRegs.GPAMUX1.bit.GPIO2  = 1;   // EPWM2A
+    GpioCtrlRegs.GPAMUX1.bit.GPIO3  = 1;   // EPWM2B
+    GpioCtrlRegs.GPAMUX1.bit.GPIO4  = 1;   // EPWM3A
+    GpioCtrlRegs.GPAMUX1.bit.GPIO5  = 1;   // EPWM3B
+    GpioCtrlRegs.GPAMUX1.bit.GPIO6  = 1;   // EPWM4A
+    GpioCtrlRegs.GPAMUX1.bit.GPIO7  = 1;   // EPWM4B
+    GpioCtrlRegs.GPAMUX1.bit.GPIO8  = 1;   // EPWM5A
+    GpioCtrlRegs.GPAMUX1.bit.GPIO9  = 1;   // EPWM5B
+    GpioCtrlRegs.GPAMUX1.bit.GPIO10 = 1;   // EPWM6A
+    GpioCtrlRegs.GPAMUX1.bit.GPIO11 = 1;   // EPWM6B
+    EDIS;
+
+
+    EALLOW;
+    GpioCtrlRegs.GPBMUX2.all = 0;
+    GpioCtrlRegs.GPBPUD.bit.GPIO58 = 0;    // pull-up register
+    GpioCtrlRegs.GPBDIR.bit.GPIO58 = 0;    // input
+    GpioCtrlRegs.GPBDIR.bit.GPIO60 = 0;
+    GpioCtrlRegs.GPBPUD.bit.GPIO60 = 0;
+    //GpioCtrlRegs.GPBDIR.bit.GPIO62 = 0;
+    //GpioCtrlRegs.GPBPUD.bit.GPIO62 = 0;
+    //GpioCtrlRegs.GPBDIR.bit.GPIO63 = 0;
+    //GpioCtrlRegs.GPBPUD.bit.GPIO63 = 0;
+    EDIS;
+
+
+}
+
+
+
+
+
